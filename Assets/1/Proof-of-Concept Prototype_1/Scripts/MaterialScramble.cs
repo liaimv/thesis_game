@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 
 public class MaterialScramble : MonoBehaviour
@@ -10,262 +11,226 @@ public class MaterialScramble : MonoBehaviour
         public Material correctMaterial;
     }
 
+    [Header("Rooms")]
+    public GameObject[] rooms;
+
+    [Header("Player (not parented under any room)")]
+    public Transform player;
+    public int CurrentRoomIndex { get; private set; } = 0;
+
     public List<MaterialData> objects = new List<MaterialData>();
 
     void Start()
     {
         SaveOriginalMaterials();
-        ScrambleMaterials();
+        ScrambleAllRooms();
+        foreach (MaterialData data in objects)
+            SetEffectsActive(data.obj, false);
+        ActivateRoom(0);
     }
 
-    // =========================================
-    // SAVE ORIGINAL MATERIALS
-    // =========================================
+    public void ActivateRoom(int roomIndex)
+    {
+        if (rooms == null || roomIndex < 0 || roomIndex >= rooms.Length || rooms[roomIndex] == null)
+        {
+            Debug.LogWarning("Invalid room index or missing room object.");
+            return;
+        }
+
+        CurrentRoomIndex = roomIndex;
+        for (int i = 0; i < rooms.Length; i++)
+            if (rooms[i] != null)
+                rooms[i].SetActive(i == roomIndex);
+
+        // Find the Start Area even if its hierarchy was previously inactive.
+        Transform start = null;
+        foreach (Transform child in rooms[roomIndex].GetComponentsInChildren<Transform>(true))
+        {
+            if (child.CompareTag("Start Area"))
+            {
+                start = child;
+                break;
+            }
+        }
+
+        if (player != null && start != null)
+        {
+            CharacterController controller = player.GetComponent<CharacterController>();
+            bool wasEnabled = controller != null && controller.enabled;
+            if (wasEnabled) controller.enabled = false;
+
+            player.SetPositionAndRotation(start.position, start.rotation);
+
+            if (wasEnabled) controller.enabled = true;
+        }
+        else
+        {
+            Debug.LogWarning("Missing player reference or tagged 'Start Area' in " + rooms[roomIndex].name);
+        }
+    }
+
+    public void NextRoom()
+    {
+        ActivateRoom(CurrentRoomIndex + 1);
+    }
 
     void SaveOriginalMaterials()
     {
         objects.Clear();
-
-        GameObject[] allObjects =
-            FindObjectsByType<GameObject>(
-                FindObjectsSortMode.None
-            );
-
-        foreach (GameObject obj in allObjects)
+        foreach (GameObject room in rooms)
         {
-            // Only look at Interactable objects
-            if (obj.layer != LayerMask.NameToLayer("Interactable"))
+            if (room == null) continue;
+            foreach (Transform child in room.GetComponentsInChildren<Transform>(true))
             {
-                continue;
-            }
+                GameObject obj = child.gameObject;
+                if (obj == room || obj.layer != LayerMask.NameToLayer("Interactable")) continue;
+                if (IsEffectRenderer(child)) continue;
 
-            // Don't save children separately
-            Transform parent = obj.transform.parent;
-            bool hasInteractableParent = false;
-
-            while (parent != null)
-            {
-                if (parent.gameObject.layer ==
-                    LayerMask.NameToLayer("Interactable"))
+                Transform parent = child.parent;
+                bool hasInteractableParent = false;
+                while (parent != null && parent != room.transform)
                 {
-                    hasInteractableParent = true;
-                    break;
+                    if (parent.gameObject.layer == LayerMask.NameToLayer("Interactable"))
+                    {
+                        hasInteractableParent = true;
+                        break;
+                    }
+                    parent = parent.parent;
                 }
+                if (hasInteractableParent) continue;
 
-                parent = parent.parent;
-            }
-
-            if (hasInteractableParent)
-            {
-                continue;
-            }
-
-            // Save one material per puzzle object
-            Renderer renderer = GetObjectRenderer(obj);
-
-            if (renderer != null)
-            {
-                Material originalMaterial = renderer.sharedMaterial;
-
-                if (originalMaterial != null)
-                {
-                    MaterialData data = new MaterialData();
-
-                    data.obj = obj;
-                    data.correctMaterial = originalMaterial;
-
-                    objects.Add(data);
-                }
+                Renderer rend = GetObjectRenderer(obj);
+                if (rend != null && rend.sharedMaterial != null)
+                    objects.Add(new MaterialData { obj = obj, correctMaterial = rend.sharedMaterial });
             }
         }
-
         Debug.Log("Saved " + objects.Count + " puzzle objects.");
     }
 
-    // =========================================
-    // SCRAMBLE MATERIALS
-    // =========================================
-
-    void ScrambleMaterials()
+    void ScrambleAllRooms()
     {
-        if (objects.Count < 2)
+        foreach (GameObject room in rooms)
+            if (room != null) ScrambleRoom(room);
+    }
+
+    void ScrambleRoom(GameObject room)
+    {
+        List<MaterialData> roomObjects = objects.FindAll(
+            data => data.obj != null && data.obj.transform.IsChildOf(room.transform));
+        if (roomObjects.Count < 2)
         {
-            Debug.Log("Need at least 2 objects to scramble!");
+            Debug.LogWarning(room.name + " needs at least two puzzle objects to scramble.");
             return;
         }
 
-        List<MaterialData> remainingObjects =
-            new List<MaterialData>(objects);
+        List<Material> materials = new List<Material>();
+        foreach (MaterialData data in roomObjects) materials.Add(data.correctMaterial);
 
-        List<Material> remainingMaterials =
-            new List<Material>();
-
-        foreach (MaterialData data in objects)
+        bool valid = false;
+        for (int attempt = 0; attempt < 1000 && !valid; attempt++)
         {
-            remainingMaterials.Add(data.correctMaterial);
-        }
-
-        bool validScramble = false;
-        int attempts = 0;
-
-        while (!validScramble && attempts < 1000)
-        {
-            // Shuffle materials
-            for (int i = 0; i < remainingMaterials.Count; i++)
+            for (int i = 0; i < materials.Count; i++)
             {
-                int randomIndex =
-                    Random.Range(i, remainingMaterials.Count);
-
-                Material temp = remainingMaterials[i];
-
-                remainingMaterials[i] =
-                    remainingMaterials[randomIndex];
-
-                remainingMaterials[randomIndex] = temp;
+                int j = Random.Range(i, materials.Count);
+                Material temp = materials[i];
+                materials[i] = materials[j];
+                materials[j] = temp;
             }
-
-            validScramble = true;
-
-            // Check that no object has its own material
-            for (int i = 0; i < remainingObjects.Count; i++)
+            valid = true;
+            for (int i = 0; i < roomObjects.Count; i++)
             {
-                if (remainingMaterials[i] ==
-                    remainingObjects[i].correctMaterial)
+                if (materials[i] == roomObjects[i].correctMaterial)
                 {
-                    validScramble = false;
+                    valid = false;
                     break;
                 }
             }
-
-            attempts++;
         }
 
-        // Apply scrambled materials
-        if (validScramble)
+        if (!valid)
         {
-            for (int i = 0; i < remainingObjects.Count; i++)
-            {
-                SetObjectMaterial(
-                    remainingObjects[i].obj,
-                    remainingMaterials[i]
-                );
-            }
+            Debug.LogError("Could not scramble " + room.name + ". Too many objects may share one material.");
+            return;
+        }
 
-            Debug.Log("Materials scrambled successfully!");
-        }
-        else
-        {
-            Debug.LogError(
-                "Could not create a valid material scramble!"
-            );
-        }
+        for (int i = 0; i < roomObjects.Count; i++)
+            SetObjectMaterial(roomObjects[i].obj, materials[i]);
     }
 
-    // =========================================
-    // CHECK CORRECT MATERIAL
-    // =========================================
-
-    public bool IsTextureCorrect(GameObject obj)
+    public GameObject GetRegisteredPuzzleObject(GameObject obj)
     {
-        GameObject puzzleObject = GetPuzzleObject(obj);
-
-        foreach (MaterialData data in objects)
+        if (obj == null) return null;
+        Transform current = obj.transform;
+        while (current != null)
         {
-            if (data.obj == puzzleObject)
-            {
-                Renderer renderer =
-                    GetObjectRenderer(puzzleObject);
-
-                if (renderer != null)
-                {
-                    return renderer.sharedMaterial ==
-                           data.correctMaterial;
-                }
-            }
+            foreach (MaterialData data in objects)
+                if (data.obj == current.gameObject) return data.obj;
+            current = current.parent;
         }
-
-        return false;
-    }
-
-    // =========================================
-    // GET CORRECT MATERIAL
-    // =========================================
-
-    public Material GetCorrectMaterial(GameObject obj)
-    {
-        GameObject puzzleObject = GetPuzzleObject(obj);
-
-        foreach (MaterialData data in objects)
-        {
-            if (data.obj == puzzleObject)
-            {
-                return data.correctMaterial;
-            }
-        }
-
         return null;
     }
 
-    // =========================================
-    // FIND PUZZLE ROOT
-    // =========================================
-
-    GameObject GetPuzzleObject(GameObject obj)
+    public bool IsTextureCorrect(GameObject obj)
     {
-        GameObject puzzleObject = obj;
-        Transform parent = obj.transform.parent;
-
-        while (parent != null)
+        GameObject root = GetRegisteredPuzzleObject(obj);
+        if (root == null) return false;
+        foreach (MaterialData data in objects)
         {
-            if (parent.gameObject.layer ==
-                    LayerMask.NameToLayer("Interactable") ||
-                parent.gameObject.layer ==
-                    LayerMask.NameToLayer("Selected"))
-            {
-                puzzleObject = parent.gameObject;
-            }
-
-            parent = parent.parent;
+            if (data.obj != root) continue;
+            Renderer rend = GetObjectRenderer(root);
+            return rend != null && rend.sharedMaterial == data.correctMaterial;
         }
-
-        return puzzleObject;
+        return false;
     }
 
-    // =========================================
-    // GET ONE RENDERER
-    // =========================================
+    public Material GetCorrectMaterial(GameObject obj)
+    {
+        GameObject root = GetRegisteredPuzzleObject(obj);
+        foreach (MaterialData data in objects)
+            if (data.obj == root) return data.correctMaterial;
+        return null;
+    }
+
+    // Returns true if this transform is part of an Effect hierarchy.
+    public bool IsEffectRenderer(Transform transform)
+    {
+        Transform current = transform;
+        while (current != null)
+        {
+            if (current.CompareTag("Effect")) return true;
+            current = current.parent;
+        }
+        return false;
+    }
 
     Renderer GetObjectRenderer(GameObject obj)
     {
-        Renderer renderer = obj.GetComponent<Renderer>();
-
-        if (renderer != null)
-        {
-            return renderer;
-        }
-
-        return obj.GetComponentInChildren<Renderer>();
+        foreach (Renderer rend in obj.GetComponentsInChildren<Renderer>(true))
+            if (!IsEffectRenderer(rend.transform)) return rend;
+        return null;
     }
-
-    // =========================================
-    // SET OBJECT MATERIAL
-    // =========================================
 
     void SetObjectMaterial(GameObject obj, Material material)
     {
-        Renderer[] renderers =
-            obj.GetComponentsInChildren<Renderer>();
-
-        foreach (Renderer renderer in renderers)
+        foreach (Renderer rend in obj.GetComponentsInChildren<Renderer>(true))
         {
-            Material[] materials = renderer.sharedMaterials;
-
-            for (int i = 0; i < materials.Length; i++)
-            {
-                materials[i] = material;
-            }
-
-            renderer.sharedMaterials = materials;
+            if (IsEffectRenderer(rend.transform)) continue;
+            Material[] materials = rend.sharedMaterials;
+            for (int i = 0; i < materials.Length; i++) materials[i] = material;
+            rend.sharedMaterials = materials;
         }
+    }
+
+    void SetEffectsActive(GameObject obj, bool active)
+    {
+        foreach (Transform child in obj.GetComponentsInChildren<Transform>(true))
+            if (child != obj.transform && child.CompareTag("Effect"))
+                child.gameObject.SetActive(active);
+    }
+
+    public void UpdateEffects(GameObject obj)
+    {
+        GameObject root = GetRegisteredPuzzleObject(obj);
+        if (root != null) SetEffectsActive(root, IsTextureCorrect(root));
     }
 }

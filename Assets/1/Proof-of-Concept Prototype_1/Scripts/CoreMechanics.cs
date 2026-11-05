@@ -31,6 +31,14 @@ public class CoreMechanics : MonoBehaviour
     public int cooldownDelay = 10;
     public float resultDelay = 3f;
     private bool isEvalCooldown = false;
+    private bool isRoomFinishChecking = false;
+    private bool isPerfectRoom = false;
+    private Coroutine evalResultCoroutine;
+    private Coroutine evalCooldownCoroutine;
+    public GameObject roomFinishCheck;
+    public TextMeshProUGUI roomFinishText;
+    public GameObject choiceButtons;
+    public GameObject nextButton;
 
     private bool guideEnabled = true;
     private bool hasEnded = false;
@@ -44,6 +52,10 @@ public class CoreMechanics : MonoBehaviour
     private Material extractedMaterial1;
     private Material extractedMaterial2;
     private Material extractedMaterial3;
+    // Remember which object each carried material was extracted from.
+    private GameObject materialOrigin1;
+    private GameObject materialOrigin2;
+    private GameObject materialOrigin3;
 
     public MaterialScramble materialScramble;
 
@@ -54,6 +66,9 @@ public class CoreMechanics : MonoBehaviour
         extractedMaterial1 = null;
         extractedMaterial2 = null;
         extractedMaterial3 = null;
+        materialOrigin1 = materialOrigin2;
+        materialOrigin2 = materialOrigin3;
+        materialOrigin3 = null;
 
         UpdateInventoryUI();
 
@@ -63,12 +78,33 @@ public class CoreMechanics : MonoBehaviour
         guideObject.SetActive(true);
         evalResult.SetActive(false);
         evalCooldown.SetActive(false);
+        roomFinishCheck.SetActive(false);
+        choiceButtons.SetActive(false);
+        nextButton.SetActive(false);
 
         Time.timeScale = 0f;
     }
 
     void Update()
     {
+        // Room completion confirmation takes priority over every other input.
+        if (isRoomFinishChecking)
+        {
+            if (isPerfectRoom)
+            {
+                if (Keyboard.current.rKey.wasPressedThisFrame)
+                    ContinueToNextRoom();
+            }
+            else
+            {
+                if (Keyboard.current.eKey.wasPressedThisFrame)
+                    CloseRoomFinishCheck();
+                else if (Keyboard.current.qKey.wasPressedThisFrame)
+                    ContinueToNextRoom();
+            }
+            return;
+        }
+
         // Guide
         if (Keyboard.current.gKey.wasPressedThisFrame)
         {
@@ -122,7 +158,7 @@ public class CoreMechanics : MonoBehaviour
 
         // Evaluate Materials
         if (!guideEnabled && !isEndChecking &&
-            !isEvalCooldown && Keyboard.current.fKey.wasPressedThisFrame)
+            !hasEnded && !isEvalCooldown && Keyboard.current.fKey.wasPressedThisFrame)
         {
             EvaluateMaterials();
         }
@@ -239,11 +275,26 @@ public class CoreMechanics : MonoBehaviour
         }
     }
 
+    // Only manipulate puzzle meshes, never Effect renderers.
+    Renderer[] GetPuzzleRenderers(GameObject obj)
+    {
+        GameObject root = materialScramble.GetRegisteredPuzzleObject(obj);
+        if (root == null) root = obj;
+
+        System.Collections.Generic.List<Renderer> result =
+            new System.Collections.Generic.List<Renderer>();
+        foreach (Renderer rend in root.GetComponentsInChildren<Renderer>(true))
+        {
+            if (!materialScramble.IsEffectRenderer(rend.transform))
+                result.Add(rend);
+        }
+        return result.ToArray();
+    }
+
     // Extract Material
     void ExtractMaterial()
     {
-        Renderer[] renderers =
-            selectedObject.GetComponentsInChildren<Renderer>();
+        Renderer[] renderers = GetPuzzleRenderers(selectedObject);
 
         if (renderers.Length == 0)
         {
@@ -262,7 +313,7 @@ public class CoreMechanics : MonoBehaviour
             return;
         }
 
-        if (StoreMaterial(selectedMaterial))
+        if (StoreMaterial(selectedMaterial, selectedObject))
         {
             // Replace all materials with checkerMaterial
             foreach (Renderer rend in renderers)
@@ -281,6 +332,8 @@ public class CoreMechanics : MonoBehaviour
                 "Extracted Material: " + selectedMaterial.name
             );
         }
+
+        materialScramble.UpdateEffects(selectedObject);
     }
 
     // Transfer Material
@@ -292,8 +345,7 @@ public class CoreMechanics : MonoBehaviour
             return;
         }
 
-        Renderer[] renderers =
-            selectedObject.GetComponentsInChildren<Renderer>();
+        Renderer[] renderers = GetPuzzleRenderers(selectedObject);
 
         if (renderers.Length == 0)
         {
@@ -333,6 +385,8 @@ public class CoreMechanics : MonoBehaviour
 
         UseMaterial();
 
+        materialScramble.UpdateEffects(selectedObject);
+
         // Check correctness
         // Requires updating TextureScramble to check materials
         // instead of textures.
@@ -347,7 +401,7 @@ public class CoreMechanics : MonoBehaviour
     }
 
     // Store Material
-    bool StoreMaterial(Material newMaterial)
+    bool StoreMaterial(Material newMaterial, GameObject sourceObject)
     {
         if (extractedMaterial3 != null)
         {
@@ -358,6 +412,9 @@ public class CoreMechanics : MonoBehaviour
         extractedMaterial3 = extractedMaterial2;
         extractedMaterial2 = extractedMaterial1;
         extractedMaterial1 = newMaterial;
+        materialOrigin3 = materialOrigin2;
+        materialOrigin2 = materialOrigin1;
+        materialOrigin1 = materialScramble.GetRegisteredPuzzleObject(sourceObject);
 
         UpdateInventoryUI();
 
@@ -448,65 +505,195 @@ public class CoreMechanics : MonoBehaviour
         );
     }
 
-    void EvaluateMaterials()
+    // Percentage for the active room ONLY.
+    float GetCurrentRoomPercentage()
     {
-        int totalObjects = materialScramble.objects.Count;
-        int correctObjects = 0;
+        GameObject room = materialScramble.rooms[materialScramble.CurrentRoomIndex];
+        int total = 0;
+        int correct = 0;
 
         foreach (MaterialScramble.MaterialData data in materialScramble.objects)
         {
+            if (data.obj == null || !data.obj.transform.IsChildOf(room.transform))
+                continue;
+
+            total++;
             if (materialScramble.IsTextureCorrect(data.obj))
-            {
-                correctObjects++;
-            }
+                correct++;
         }
 
-        float percentage = 0f;
+        return total == 0 ? 0f : (float)correct / total * 100f;
+    }
 
-        if (totalObjects > 0)
-        {
-            percentage = ((float)correctObjects / totalObjects) * 100f;
-        }
+    void EvaluateMaterials()
+    {
+        float percentage = GetCurrentRoomPercentage();
 
         evalResultPercentage.text = Mathf.RoundToInt(percentage) + "%";
-
-        // Show evaluation result
         evalResult.SetActive(true);
 
-        StartCoroutine(HideEvalResult());
+        if (evalResultCoroutine != null)
+        {
+            StopCoroutine(evalResultCoroutine);
+            evalResultCoroutine = null;
+        }
 
-        // Start cooldown
+        // ALWAYS start cooldown when evaluating
         isEvalCooldown = true;
         evalCooldown.SetActive(true);
 
-        StartCoroutine(EvaluationCooldown());
+        if (evalCooldownCoroutine != null)
+        {
+            StopCoroutine(evalCooldownCoroutine);
+        }
+
+        evalCooldownCoroutine = StartCoroutine(EvaluationCooldown());
+
+        // Room completion check
+        if (percentage >= 50f)
+        {
+            isRoomFinishChecking = true;
+            isPerfectRoom = percentage >= 100f - 0.0001f;
+
+            roomFinishCheck.SetActive(true);
+            choiceButtons.SetActive(!isPerfectRoom);
+            nextButton.SetActive(isPerfectRoom);
+
+            roomFinishText.text = isPerfectRoom
+                ? "You have fully repaired this section!"
+                : "This section has reached the minimum reparation level required to continue. However, some corruption remains. Once you proceed, you won't be able to return to this section to repair. Any materials you are holding will be returned to their last assigned objects. Are you sure you want to continue?";
+
+            // Keep evaluation result visible
+        }
+        else
+        {
+            // Hide result after delay
+            evalResultCoroutine = StartCoroutine(HideEvalResult());
+        }
     }
 
-    // Hide Evaluation Result
-    IEnumerator HideEvalResult()
+    void CloseRoomFinishCheck()
     {
-        yield return new WaitForSecondsRealtime(resultDelay);
-
+        isRoomFinishChecking = false;
+        roomFinishCheck.SetActive(false);
+        choiceButtons.SetActive(false);
+        nextButton.SetActive(false);
         evalResult.SetActive(false);
     }
 
-    // Evaluation Cooldown
+    void ContinueToNextRoom()
+    {
+        // Return materials before disabling the old room
+        ReturnHeldMaterials();
+
+        CloseRoomFinishCheck();
+
+        // Reset evaluation cooldown for the next room
+        ResetEvaluationCooldown();
+
+        if (selectedObject != null)
+        {
+            SetObjectLayer(
+                selectedObject,
+                LayerMask.NameToLayer("Interactable")
+            );
+
+            selectedObject = null;
+        }
+
+        if (materialScramble.CurrentRoomIndex + 1 <
+            materialScramble.rooms.Length)
+        {
+            // Activate next room and teleport player
+            materialScramble.NextRoom();
+        }
+        else
+        {
+            // Last room completed
+            CalculateFixedPercentage();
+
+            finalResults.SetActive(true);
+            hasEnded = true;
+        }
+    }
+
+    void ReturnHeldMaterials()
+    {
+        ReturnMaterialToOrigin(extractedMaterial1, materialOrigin1);
+        ReturnMaterialToOrigin(extractedMaterial2, materialOrigin2);
+        ReturnMaterialToOrigin(extractedMaterial3, materialOrigin3);
+
+        extractedMaterial1 = null;
+        extractedMaterial2 = null;
+        extractedMaterial3 = null;
+        materialOrigin1 = null;
+        materialOrigin2 = null;
+        materialOrigin3 = null;
+        UpdateInventoryUI();
+    }
+
+    void ReturnMaterialToOrigin(Material material, GameObject origin)
+    {
+        if (material == null || origin == null)
+            return;
+
+        Renderer[] renderers = origin.GetComponentsInChildren<Renderer>(true);
+        foreach (Renderer rend in renderers)
+        {
+            if (materialScramble.IsEffectRenderer(rend.transform))
+                continue;
+
+            // Only refill empty (checkerboard) material slots.
+            Material[] materials = rend.sharedMaterials;
+            bool changed = false;
+            for (int i = 0; i < materials.Length; i++)
+            {
+                if (materials[i] == checkerMaterial)
+                {
+                    materials[i] = material;
+                    changed = true;
+                }
+            }
+            if (changed)
+                rend.sharedMaterials = materials;
+        }
+        materialScramble.UpdateEffects(origin);
+    }
+
+    IEnumerator HideEvalResult()
+    {
+        yield return new WaitForSecondsRealtime(resultDelay);
+        if (!isRoomFinishChecking)
+            evalResult.SetActive(false);
+        evalResultCoroutine = null;
+    }
+
     IEnumerator EvaluationCooldown()
     {
         float remainingTime = Mathf.Max(0, cooldownDelay);
-
         while (remainingTime > 0f)
         {
             evalCooldownTime.text = Mathf.CeilToInt(remainingTime).ToString();
-
             yield return null;
-
             remainingTime -= Time.unscaledDeltaTime;
         }
-
         evalCooldownTime.text = "0";
-
         evalCooldown.SetActive(false);
         isEvalCooldown = false;
+        evalCooldownCoroutine = null;
+    }
+
+    void ResetEvaluationCooldown()
+    {
+        if (evalCooldownCoroutine != null)
+        {
+            StopCoroutine(evalCooldownCoroutine);
+            evalCooldownCoroutine = null;
+        }
+
+        isEvalCooldown = false;
+
+        evalCooldownTime.text = "0";
+        evalCooldown.SetActive(false);
     }
 }
