@@ -2,8 +2,15 @@ using UnityEngine;
 
 public class InitializeCollisionObject : MonoBehaviour
 {
-    void Awake()
+    private bool hasInitialized = false;
+
+    public void InitializeColliders()
     {
+        if (hasInitialized)
+            return;
+
+        hasInitialized = true;
+
         // Include inactive objects in other rooms
         Transform[] allObjects =
             FindObjectsByType<Transform>(
@@ -72,6 +79,13 @@ public class InitializeCollisionObject : MonoBehaviour
         GameObject colliderObject =
             GameObject.CreatePrimitive(type);
 
+        Collider physicsCollider = colliderObject.GetComponent<Collider>();
+
+        if (physicsCollider != null)
+        {
+            Destroy(physicsCollider);
+        }
+
         colliderObject.name = "ColliderDisplay";
 
         // Parent under target
@@ -124,6 +138,13 @@ public class InitializeCollisionObject : MonoBehaviour
 
         colliderObject.tag = "Collider";
         colliderObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+
+        MeshRenderer meshRenderer = colliderObject.GetComponent<MeshRenderer>();
+
+        if (meshRenderer != null)
+        {
+            meshRenderer.enabled = false;
+        }
 
         Debug.Log(
             "Created " + type +

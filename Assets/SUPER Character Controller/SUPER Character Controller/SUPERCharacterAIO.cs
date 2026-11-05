@@ -629,19 +629,36 @@ public class SUPERCharacterAIO : MonoBehaviour{
     void FixedUpdate() {
         if(!controllerPaused){
 
-            
 
-            #region Movement
-            if(enableMovementControl){
-                GetGroundInfo();
-                MovePlayer(InputDir,currentGroundSpeed);
 
-                if(isSliding){Slide();}
-            }
-            #endregion
+                #region Movement
+                //if(enableMovementControl){
+                //    GetGroundInfo();
+                //    MovePlayer(InputDir,currentGroundSpeed);
 
-            #region Camera
-            RotateView(MouseXY, Sensitivity, rotationWeight);
+                //    if(isSliding){Slide();}
+                //}
+
+                if (enableMovementControl)
+                {
+                    GetGroundInfo();
+
+                    // Disable gravity when grounded
+                    // Enable gravity when jumping or airborne
+                    p_Rigidbody.useGravity =
+                        !currentGroundInfo.isInContactWithGround || Jumped;
+
+                    MovePlayer(InputDir, currentGroundSpeed);
+
+                    if (isSliding)
+                    {
+                        Slide();
+                    }
+                }
+                #endregion
+
+                #region Camera
+                RotateView(MouseXY, Sensitivity, rotationWeight);
              if(cameraPerspective == PerspectiveModes._3rdPerson){
                 UpdateBodyRotation_3rdPerson();
                 UpdateCameraPosition_3rdPerson();
@@ -944,15 +961,36 @@ public class SUPERCharacterAIO : MonoBehaviour{
         //Movement
         if((currentGroundInfo.isGettingGroundInfo) && !Jumped && !isSliding && !doingPosInterp)
         {
-            //Deceleration
-            if(Direction.magnitude==0&& p_Rigidbody.linearVelocity.normalized.magnitude>0.1f){
-                p_Rigidbody.AddForce(-new Vector3(p_Rigidbody.linearVelocity.x,currentGroundInfo.isInContactWithGround? p_Rigidbody.linearVelocity.y-  Physics.gravity.y:0,p_Rigidbody.linearVelocity.z)*(decelerationSpeed*Time.fixedDeltaTime),ForceMode.Force); 
-            }
-            //normal speed
-            else if((currentGroundInfo.isGettingGroundInfo) && currentGroundInfo.groundAngle<hardSlopeLimit && currentGroundInfo.groundAngle_Raw<hardSlopeLimit){
-                p_Rigidbody.linearVelocity = (Vector3.MoveTowards(p_Rigidbody.linearVelocity,Vector3.ClampMagnitude(((Direction)*((Speed)*Time.fixedDeltaTime))+(Vector3.down),Speed/50),1));
-            }
-            capsule.sharedMaterial = InputDir.magnitude>0 ? _ZeroFriction : _MaxFriction;
+                //Deceleration
+                //if(Direction.magnitude==0&& p_Rigidbody.linearVelocity.normalized.magnitude>0.1f){
+                //    p_Rigidbody.AddForce(-new Vector3(p_Rigidbody.linearVelocity.x,currentGroundInfo.isInContactWithGround? p_Rigidbody.linearVelocity.y-  Physics.gravity.y:0,p_Rigidbody.linearVelocity.z)*(decelerationSpeed*Time.fixedDeltaTime),ForceMode.Force); 
+                //}
+                if (Direction.sqrMagnitude < 0.0001f)
+                {
+                    p_Rigidbody.linearVelocity = Vector3.zero;
+                }
+                //normal speed
+                else if ((currentGroundInfo.isGettingGroundInfo) &&
+             currentGroundInfo.groundAngle < hardSlopeLimit &&
+             currentGroundInfo.groundAngle_Raw < hardSlopeLimit)
+                {
+                    // Project movement direction onto the slope
+                    Vector3 slopeDirection = Vector3.ProjectOnPlane(
+                        Direction,
+                        currentGroundInfo.groundNormal_Averaged
+                    ).normalized * Direction.magnitude;
+
+                    // Move along the slope
+                    Vector3 targetVelocity =
+                        slopeDirection * (Speed * Time.fixedDeltaTime);
+
+                    p_Rigidbody.linearVelocity = Vector3.MoveTowards(
+                        p_Rigidbody.linearVelocity,
+                        targetVelocity,
+                        1f
+                    );
+                }
+                capsule.sharedMaterial = InputDir.magnitude>0 ? _ZeroFriction : _MaxFriction;
         }
         //Sliding
         else if(isSliding){

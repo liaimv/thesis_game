@@ -5,6 +5,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using System.Collections;
 using SUPERCharacter;
+using System.Collections.Generic;
 
 public class CoreMechanics : MonoBehaviour
 {
@@ -63,11 +64,40 @@ public class CoreMechanics : MonoBehaviour
     public GameObject flashlight;
 
     [Header("Scan View")]
-    public bool hasRepairedDone = true;
+    public bool hasRepairedDone = false;
     public GameObject[] scanColliders;
+    public GameObject[] unscanColliders;
 
     public SUPERCharacterAIO playerController;
 
+    [Header("Virus Interaction")]
+    public GameObject[] virusObjects;
+    public float virusDetectionDistance = 3f;
+
+    public GameObject destroyUI;
+    public GameObject destroyChoice;
+    public GameObject endUI;
+
+    private GameObject highlightedVirus;
+    private bool isDestroyChoiceOpen = false;
+    private bool hasDestroyedVirus = false;
+
+    private Dictionary<Transform, int> originalVirusLayers =
+        new Dictionary<Transform, int>();
+
+    public GameObject actualVirus;
+    public float virusMoveDistance = 0.05f;
+
+    private Vector3 originalVirusPosition;
+
+    private bool previousScanViewState = false;
+
+    public ScanViewLogic scanViewLogic;
+
+    public TextMeshProUGUI resultText;
+    public TextMeshProUGUI resultDetail;
+
+    public InitializeCollisionObject collisionInitializer;
 
     private IEnumerator Start()
     {
@@ -90,6 +120,11 @@ public class CoreMechanics : MonoBehaviour
         roomFinishCheck.SetActive(false);
         choiceButtons.SetActive(false);
         nextButton.SetActive(false);
+        destroyUI.SetActive(false);
+        destroyChoice.SetActive(false);
+        endUI.SetActive(false);
+
+        ChooseRandomVirus();
 
         Time.timeScale = 0f;
 
@@ -137,6 +172,12 @@ public class CoreMechanics : MonoBehaviour
                 guideEnabled = true;
                 Time.timeScale = 0f;
             }
+        }
+
+        if (hasRepairedDone)
+        {
+            UpdateVirusInteraction();
+            return;
         }
 
         // Large Material Preview
@@ -526,19 +567,49 @@ public class CoreMechanics : MonoBehaviour
     // Percentage for the active room ONLY.
     float GetCurrentRoomPercentage()
     {
-        GameObject room = materialScramble.rooms[materialScramble.CurrentRoomIndex];
+        GameObject room =
+            materialScramble.rooms[materialScramble.CurrentRoomIndex];
+
         int total = 0;
         int correct = 0;
 
+        Debug.Log("Evaluating room: " + room.name);
+        Debug.Log("Total registered puzzle objects: " +
+                  materialScramble.objects.Count);
+
         foreach (MaterialScramble.MaterialData data in materialScramble.objects)
         {
-            if (data.obj == null || !data.obj.transform.IsChildOf(room.transform))
+            if (data.obj == null ||
+                !data.obj.transform.IsChildOf(room.transform))
                 continue;
 
             total++;
-            if (materialScramble.IsTextureCorrect(data.obj))
+
+            bool isCorrect =
+                materialScramble.IsTextureCorrect(data.obj);
+
+            if (isCorrect)
                 correct++;
+
+            Renderer[] renderers = GetPuzzleRenderers(data.obj);
+
+            Material currentMaterial =
+                renderers.Length > 0 ? renderers[0].sharedMaterial : null;
+
+            Debug.Log(
+                "Object: " + data.obj.name +
+                " | Current Material: " +
+                (currentMaterial != null ? currentMaterial.name : "NULL") +
+                " | Correct Material: " +
+                (data.correctMaterial != null ? data.correctMaterial.name : "NULL") +
+                " | Is Correct: " + isCorrect
+            );
         }
+
+        Debug.Log(
+            "ROOM RESULT: " + correct + "/" + total +
+            " objects correct."
+        );
 
         return total == 0 ? 0f : (float)correct / total * 100f;
     }
@@ -601,12 +672,12 @@ public class CoreMechanics : MonoBehaviour
 
     void ContinueToNextRoom()
     {
-        // Return materials before disabling the old room
+        // Return materials before leaving the current room
         ReturnHeldMaterials();
 
         CloseRoomFinishCheck();
 
-        // Reset evaluation cooldown for the next room
+        // Reset evaluation cooldown
         ResetEvaluationCooldown();
 
         if (selectedObject != null)
@@ -619,20 +690,49 @@ public class CoreMechanics : MonoBehaviour
             selectedObject = null;
         }
 
+        // Check whether there is another repair room
         if (materialScramble.CurrentRoomIndex + 1 <
             materialScramble.rooms.Length)
         {
-            // Activate next room and teleport player
+            // Continue Phase 1
             materialScramble.NextRoom();
         }
         else
         {
-            // Last room completed
-            CalculateFixedPercentage();
-
-            finalResults.SetActive(true);
-            hasEnded = true;
+            // All repair rooms completed
+            // Start Phase 2
+            StartScanPhase();
         }
+    }
+
+    void StartScanPhase()
+    {
+        // Enable Phase 2
+        hasRepairedDone = true;
+
+        CalculateFixedPercentage();
+
+        // Return to the first room
+        materialScramble.ActivateRoom(0);
+
+        Rigidbody rb = playerController.GetComponent<Rigidbody>();
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
+
+        // Generate collider displays for Phase 2
+        collisionInitializer.InitializeColliders();
+
+        // Enable Scan Phase
+        EnableScanPhase();
+
+        // Refresh Scan View's renderer references
+        scanViewLogic.RefreshRenderers();
+
+        Debug.Log("Phase 2 Started! Collider displays initialized.");
     }
 
     void ReturnHeldMaterials()
@@ -781,10 +881,227 @@ public class CoreMechanics : MonoBehaviour
             }
         }
 
+        foreach (GameObject obj in unscanColliders)
+        {
+            if (obj == null)
+                continue;
+
+            Transform[] allChildren =
+                obj.GetComponentsInChildren<Transform>(false);
+
+            foreach (Transform child in allChildren)
+            {
+                child.gameObject.SetActive(false);
+            }
+        }
+
         Debug.Log(
             "Scan Phase Enabled! All rooms activated. Removed " +
             removedCount + " colliders."
         );
+    }
+
+    void UpdateVirusInteraction()
+    {
+        if (hasDestroyedVirus)
+            return;
+
+        GameObject closestVirus = null;
+        float closestDistance = virusDetectionDistance;
+
+        // Find the nearest chair
+        foreach (GameObject virus in virusObjects)
+        {
+            if (virus == null || !virus.activeInHierarchy)
+                continue;
+
+            float distance = Vector3.Distance(
+                playerController.transform.position,
+                virus.transform.position
+            );
+
+            if (distance <= closestDistance)
+            {
+                closestDistance = distance;
+                closestVirus = virus;
+            }
+        }
+
+        // Update highlighted chair
+        if (highlightedVirus != closestVirus)
+        {
+            ClearVirusHighlight();
+
+            if (closestVirus != null)
+            {
+                highlightedVirus = closestVirus;
+
+                SetVirusHighlightLayer(
+                    highlightedVirus.transform,
+                    LayerMask.NameToLayer("Selected")
+                );
+            }
+        }
+
+        // Player is no longer near a chair
+        if (highlightedVirus == null)
+        {
+            destroyUI.SetActive(false);
+            destroyChoice.SetActive(false);
+            isDestroyChoiceOpen = false;
+            return;
+        }
+
+        // Confirmation UI is currently open
+        if (isDestroyChoiceOpen)
+        {
+            destroyUI.SetActive(false);
+
+            // Q = Confirm destruction
+            if (Keyboard.current.qKey.wasPressedThisFrame)
+            {
+                // Check if the selected chair is the actual virus
+                bool isCorrectVirus = highlightedVirus == actualVirus;
+
+                if (isCorrectVirus)
+                {
+                    resultText.text = "SUCCESS";
+                    resultDetail.text = "You successfully destroyed the virus!";
+                }
+                else
+                {
+                    resultText.text = "GAME OVER";
+                    resultDetail.text = "You destroyed the wrong object. The game broke.";
+                }
+
+                destroyUI.SetActive(false);
+                destroyChoice.SetActive(false);
+                endUI.SetActive(true);
+
+                isDestroyChoiceOpen = false;
+                hasDestroyedVirus = true;
+
+                ClearVirusHighlight();
+            }
+
+            // E = Cancel destruction
+            else if (Keyboard.current.eKey.wasPressedThisFrame)
+            {
+                destroyChoice.SetActive(false);
+                isDestroyChoiceOpen = false;
+            }
+
+            return;
+        }
+
+        // Player is near a chair
+        destroyUI.SetActive(true);
+
+        // E = Open destruction confirmation
+        if (Keyboard.current.eKey.wasPressedThisFrame)
+        {
+            destroyUI.SetActive(false);
+            destroyChoice.SetActive(true);
+            isDestroyChoiceOpen = true;
+        }
+    }
+
+    void SetVirusHighlightLayer(Transform target, int layer)
+    {
+        // Don't change Collider display layers
+        if (target.CompareTag("Collider"))
+            return;
+
+        // Save original layer
+        if (!originalVirusLayers.ContainsKey(target))
+        {
+            originalVirusLayers.Add(
+                target,
+                target.gameObject.layer
+            );
+        }
+
+        target.gameObject.layer = layer;
+
+        // Highlight children too
+        foreach (Transform child in target)
+        {
+            SetVirusHighlightLayer(child, layer);
+        }
+    }
+
+    void ClearVirusHighlight()
+    {
+        // Restore all original layers
+        foreach (KeyValuePair<Transform, int> entry in originalVirusLayers)
+        {
+            if (entry.Key != null)
+            {
+                entry.Key.gameObject.layer = entry.Value;
+            }
+        }
+
+        originalVirusLayers.Clear();
+        highlightedVirus = null;
+    }
+
+    void ChooseRandomVirus()
+    {
+        List<GameObject> validViruses = new List<GameObject>();
+
+        foreach (GameObject obj in virusObjects)
+        {
+            if (obj != null)
+            {
+                validViruses.Add(obj);
+            }
+        }
+
+        if (validViruses.Count == 0)
+        {
+            Debug.LogWarning("No virus objects assigned!");
+            return;
+        }
+
+        int randomIndex = Random.Range(0, validViruses.Count);
+
+        actualVirus = validViruses[randomIndex];
+
+        // Save original position of the chair parent
+        originalVirusPosition = actualVirus.transform.position;
+
+        Debug.Log("Actual Virus: " + actualVirus.name);
+    }
+
+    public void UpdateVirusMovement()
+    {
+        if (!hasRepairedDone || scanViewLogic == null || actualVirus == null)
+            return;
+
+        bool currentScanViewState = scanViewLogic.IsScanViewOn;
+
+        // Only execute when Scan View changes
+        if (currentScanViewState == previousScanViewState)
+            return;
+
+        if (currentScanViewState)
+        {
+            // Entering Scan View: move entire chair hierarchy
+            actualVirus.transform.position =
+                originalVirusPosition +
+                Vector3.forward * virusMoveDistance;
+
+            Debug.Log("Virus chair and collider display moved.");
+        }
+        else
+        {
+            // Leaving Scan View: restore entire chair hierarchy
+            actualVirus.transform.position = originalVirusPosition;
+
+            Debug.Log("Virus chair and collider display returned.");
+        }
+
+        previousScanViewState = currentScanViewState;
     }
 }
 

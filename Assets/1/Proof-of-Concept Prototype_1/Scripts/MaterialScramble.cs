@@ -195,11 +195,18 @@ public class MaterialScramble : MonoBehaviour
     public bool IsEffectRenderer(Transform transform)
     {
         Transform current = transform;
+
         while (current != null)
         {
-            if (current.CompareTag("Effect")) return true;
+            if (current.CompareTag("Effect") ||
+                current.CompareTag("Collider"))
+            {
+                return true;
+            }
+
             current = current.parent;
         }
+
         return false;
     }
 
