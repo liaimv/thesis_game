@@ -56,13 +56,23 @@ public class SUPERCharacterAIO : MonoBehaviour{
     public float FOVSensitivityMultiplier = 0.74f;
 
     //Third Person
+    [Header("Third Person Camera Collision")]
+    public float cameraCollisionRadius = 0.2f;
+    public float cameraCollisionPadding = 0.1f;
+    public float cameraReturnSmoothTime = 0.15f;
+    public float minimumCameraDistance = 0.6f;
+
+    private float cameraCollisionVelocity;
     public bool rotateCharacterToCameraForward = false;
     public float maxCameraDistance = 8;
     public LayerMask cameraObstructionIgnore = -1;
     public float cameraZoomSensitivity = 5; 
     public float bodyCatchupSpeed = 2.5f;
     public float inputResponseFiltering = 2.5f;
-
+    
+    [Header("Camera Close-Up")]
+    public float hideCharacterDistance = 1f;
+    public Renderer[] characterRenderers;
 
 
     //
@@ -538,20 +548,59 @@ public class SUPERCharacterAIO : MonoBehaviour{
         if(currentStance == Stances.Standing && !changingStances){
             internalEyeHeight = standingEyeHeight;
         }
-        #endregion
+                #endregion
 
-        #region Movement
-        if(cameraPerspective == PerspectiveModes._3rdPerson){
-            HeadRotDirForInput = Mathf.MoveTowardsAngle(HeadRotDirForInput,headRot.y, bodyCatchupSpeed*(1+Time.deltaTime));
-            MovInput_Smoothed = Vector2.MoveTowards(MovInput_Smoothed, MovInput, inputResponseFiltering*(1+Time.deltaTime));
-        }
-        InputDir = cameraPerspective == PerspectiveModes._1stPerson?  Vector3.ClampMagnitude((transform.forward*MovInput.y+transform.right * (viewInputMethods == ViewInputModes.Traditional ? MovInput.x : 0)),1) : Quaternion.AngleAxis(HeadRotDirForInput,Vector3.up) * (Vector3.ClampMagnitude((Vector3.forward*MovInput_Smoothed.y+Vector3.right * MovInput_Smoothed.x),1));
-        GroundMovementSpeedUpdate();
-        if(canJump && (holdJump? jumpInput_Momentary : jumpInput_FrameOf)){Jump(jumpPower);}
-        #endregion
-        
-        #region Stamina system
-        if(enableStaminaSystem){CalculateStamina();}
+                #region Movement
+
+                if (cameraPerspective == PerspectiveModes._3rdPerson)
+                {
+                    MovInput_Smoothed = Vector2.MoveTowards(
+                        MovInput_Smoothed,
+                        MovInput,
+                        inputResponseFiltering * (1 + Time.deltaTime)
+                    );
+
+                    // Camera direction without vertical rotation
+                    Vector3 cameraForward = playerCamera.transform.forward;
+                    Vector3 cameraRight = playerCamera.transform.right;
+
+                    cameraForward.y = 0f;
+                    cameraRight.y = 0f;
+
+                    cameraForward.Normalize();
+                    cameraRight.Normalize();
+
+                    // Move relative to camera direction
+                    InputDir = Vector3.ClampMagnitude(
+                        cameraForward * MovInput_Smoothed.y +
+                        cameraRight * MovInput_Smoothed.x,
+                        1f
+                    );
+                }
+                else
+                {
+                    // Keep existing first-person movement
+                    InputDir = Vector3.ClampMagnitude(
+                        transform.forward * MovInput.y +
+                        transform.right *
+                        (viewInputMethods == ViewInputModes.Traditional
+                            ? MovInput.x
+                            : 0),
+                        1f
+                    );
+                }
+
+                GroundMovementSpeedUpdate();
+
+                if (canJump && (holdJump ? jumpInput_Momentary : jumpInput_FrameOf))
+                {
+                    Jump(jumpPower);
+                }
+
+                #endregion
+
+                #region Stamina system
+                if (enableStaminaSystem){CalculateStamina();}
         #endregion
 
         #region Footstep
@@ -796,29 +845,81 @@ public class SUPERCharacterAIO : MonoBehaviour{
             if(StepCycle>(headbobCyclePosition*3)){StepCycle = headbobCyclePosition+0.5f;}
         }
     }
-    void UpdateCameraPosition_3rdPerson(){
+        void UpdateCameraPosition_3rdPerson()
+        {
+            headPos = transform.position + Vector3.up * standingEyeHeight;
+            quatHeadRot = Quaternion.Euler(headRot);
 
-        //Camera Obstacle Check
-        cameraObstCheck= new Ray(headPos+(quatHeadRot*(Vector3.forward*capsule.radius)), quatHeadRot*-Vector3.forward); 
-        if(Physics.SphereCast(cameraObstCheck, 0.5f, out cameraObstResult,maxCameraDistInternal, cameraObstructionIgnore,QueryTriggerInteraction.Ignore)){
-            currentCameraZ = -(Vector3.Distance(headPos,cameraObstResult.point)*0.9f);
+            // Desired camera distance
+            float desiredDistance = maxCameraDistInternal * 0.85f;
+            float targetDistance = desiredDistance;
 
-        }else{
-            currentCameraZ = Mathf.SmoothDamp(currentCameraZ, -(maxCameraDistInternal*0.85f), ref cameraZRef ,Time.deltaTime,10,Time.fixedDeltaTime);
+            // Check obstacles between player and camera
+            Vector3 cameraDirection =
+                quatHeadRot * Vector3.back;
+
+            Ray ray = new Ray(headPos, cameraDirection);
+
+            if (Physics.SphereCast(
+                ray,
+                cameraCollisionRadius,
+                out RaycastHit hit,
+                desiredDistance,
+                cameraObstructionIgnore,
+                QueryTriggerInteraction.Ignore))
+            {
+                targetDistance = Mathf.Max(
+                minimumCameraDistance,
+                hit.distance - cameraCollisionPadding
+            );
+            }
+
+            float currentDistance = Mathf.Max(0f, -currentCameraZ);
+
+            if (targetDistance < currentDistance)
+            {
+                // Immediately prevent the camera from passing through a wall
+                currentDistance = targetDistance;
+                cameraCollisionVelocity = 0f;
+            }
+            else
+            {
+                // Smoothly move camera back to its normal distance
+                currentDistance = Mathf.SmoothDamp(
+                    currentDistance,
+                    targetDistance,
+                    ref cameraCollisionVelocity,
+                    cameraReturnSmoothTime,
+                    Mathf.Infinity,
+                    Time.fixedDeltaTime
+                );
+            }
+
+            currentCameraZ = -currentDistance;
+
+            // Apply camera position and rotation
+            playerCamera.transform.position =
+                headPos + cameraDirection * currentDistance;
+
+            playerCamera.transform.rotation = quatHeadRot;
+
+            float cameraDistance = Vector3.Distance(
+    playerCamera.transform.position,
+    headPos
+);
+
+            bool shouldShowCharacter = cameraDistance >= hideCharacterDistance;
+
+            foreach (Renderer rend in characterRenderers)
+            {
+                if (rend != null)
+                {
+                    rend.enabled = shouldShowCharacter;
+                }
+            }
         }
 
-        //Debugging
-        if(enableMouseAndCameraDebugging){
-            Debug.Log(headRot);
-            Debug.DrawRay(cameraObstCheck.origin,cameraObstCheck.direction*maxCameraDistance,Color.red);
-            Debug.DrawRay(cameraObstCheck.origin,cameraObstCheck.direction*-currentCameraZ,Color.green);
-        }   
-        currentCameraPos = headPos + (quatHeadRot *( Vector3.forward * currentCameraZ));
-            playerCamera.transform.position = currentCameraPos;
-        playerCamera.transform.rotation = quatHeadRot;
-    }
-
-    void UpdateBodyRotation_3rdPerson(){
+        void UpdateBodyRotation_3rdPerson(){
          //if is moving, rotate capsule to match camera forward   //change button down to bool of isFiring or isTargeting
         if(!isIdle && !isSliding && currentGroundInfo.isGettingGroundInfo){
             transform.rotation = (Quaternion.Euler(0,Mathf.MoveTowardsAngle(p_Rigidbody.rotation.eulerAngles.y,(Mathf.Atan2(InputDir.x,InputDir.z)*Mathf.Rad2Deg),10), 0));
@@ -1716,7 +1817,7 @@ public class SuperFPEditor : Editor{
             if(!t.automaticallySwitchPerspective){t.perspectiveSwitchingKey_L = (KeyCode)EditorGUILayout.EnumPopup(new GUIContent("Perspective Switch Key", "The keyboard key used to switch perspective modes. Set to none if you do not wish to allow perspective switching"),t.perspectiveSwitchingKey_L);}
             #endif
             t.mouseInputInversion = (MouseInputInversionModes)EditorGUILayout.EnumPopup(new GUIContent("Mouse Input Inversion", "Which axes of the mouse input should be inverted if any?"),t.mouseInputInversion);
-            t.Sensitivity = EditorGUILayout.Slider(new GUIContent("Mouse Sensitivity", "Sensitivity of the mouse"),t.Sensitivity,1,20);
+            t.Sensitivity = EditorGUILayout.Slider(new GUIContent("Mouse Sensitivity", "Sensitivity of the mouse"),t.Sensitivity,1,50);
             t.rotationWeight = EditorGUILayout.Slider(new GUIContent("Camera Weight", "How heavy should the camera feel?"),t.rotationWeight, 1,25);
             t.verticalRotationRange =EditorGUILayout.Slider(new GUIContent("Vertical Rotation Range", "The vertical angle range (In degrees) that the camera is allowed to move in"),t.verticalRotationRange,1,180);
   
@@ -1742,7 +1843,58 @@ public class SuperFPEditor : Editor{
                 t.cameraZoomSensitivity = EditorGUILayout.Slider(new GUIContent("Camera Zoom Sensitivity", "How sensitive should the mouse scroll wheel be when zooming the camera in and out?"),t.cameraZoomSensitivity, 1,5);
                 t.bodyCatchupSpeed = EditorGUILayout.Slider(new GUIContent("Body Mesh Alignment Speed","How quickly will the body align itself with the camera's relative direction"),t.bodyCatchupSpeed, 0, 5);
                 t.inputResponseFiltering = EditorGUILayout.Slider(new GUIContent("Input Response Filtering","How quickly will the internal input direction align itself the player's input"),t.inputResponseFiltering, 0, 5);
-                EditorGUILayout.PropertyField(obstructionMaskField,new GUIContent("Camera Obstruction Layers", "The Layers the camera will register as an obstruction and move in front of ."));
+                    // Third Person Camera Collision
+                    EditorGUILayout.Space(10);
+                    EditorGUILayout.LabelField(
+                        "Third Person Camera Collision",
+                        EditorStyles.boldLabel
+                    );
+
+                    t.cameraCollisionRadius = EditorGUILayout.FloatField(
+                        "Camera Collision Radius",
+                        t.cameraCollisionRadius
+                    );
+
+                    t.cameraCollisionPadding = EditorGUILayout.FloatField(
+                        "Camera Collision Padding",
+                        t.cameraCollisionPadding
+                    );
+
+                    t.cameraReturnSmoothTime = EditorGUILayout.FloatField(
+                        "Camera Return Smooth Time",
+                        t.cameraReturnSmoothTime
+                    );
+
+                    t.minimumCameraDistance = EditorGUILayout.FloatField(
+                        "Minimum Camera Distance",
+                        t.minimumCameraDistance
+                    );
+
+                    // Camera Close-Up
+                    EditorGUILayout.Space(10);
+                    EditorGUILayout.LabelField(
+                        "Camera Close-Up",
+                        EditorStyles.boldLabel
+                    );
+
+                    t.hideCharacterDistance = EditorGUILayout.FloatField(
+                        "Hide Character Distance",
+                        t.hideCharacterDistance
+                    );
+
+                    tSO.Update();
+
+                    SerializedProperty characterRenderersProperty =
+                        tSO.FindProperty("characterRenderers");
+
+                    EditorGUILayout.PropertyField(
+                        characterRenderersProperty,
+                        new GUIContent("Character Renderers"),
+                        true
+                    );
+
+                    tSO.ApplyModifiedProperties();
+                    EditorGUILayout.PropertyField(obstructionMaskField,new GUIContent("Camera Obstruction Layers", "The Layers the camera will register as an obstruction and move in front of ."));
             }
         }
         EditorGUILayout.Space();

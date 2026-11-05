@@ -14,6 +14,15 @@ TagManager:
   - Chandelier
   - Effect
   - Start Area
+  - MushroomSpotlight
+  - Plant
+  - NPC
+  - Collider
+  - Helmet
+  - Capsule
+  - Box
+  - Key
+  - Sphere
   layers:
   - Default
   - TransparentFX

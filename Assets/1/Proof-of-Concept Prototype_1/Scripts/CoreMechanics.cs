@@ -4,6 +4,7 @@ using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using System.Collections;
+using SUPERCharacter;
 
 public class CoreMechanics : MonoBehaviour
 {
@@ -12,7 +13,7 @@ public class CoreMechanics : MonoBehaviour
 
     private GameObject selectedObject;
 
-    //UI
+    [Header("Material UI")]
     public RawImage textureImage1;
     public RawImage textureImage2;
     public RawImage textureImage3;
@@ -23,7 +24,7 @@ public class CoreMechanics : MonoBehaviour
     public TextMeshProUGUI fixedPercentage;
     public GameObject guideObject;
 
-    //Evaluation UI
+    [Header("Evaluation UI")]
     public GameObject evalCooldown;
     public TextMeshProUGUI evalCooldownTime;
     public GameObject evalResult;
@@ -45,7 +46,7 @@ public class CoreMechanics : MonoBehaviour
     private bool isEndChecking = false;
     private bool largeTextureEnabled = false;
 
-    // Materials
+    [Header("Materials")]
     public Material checkerMaterial;
     public Texture checkerTex;
 
@@ -61,8 +62,16 @@ public class CoreMechanics : MonoBehaviour
 
     public GameObject flashlight;
 
-    void Start()
+    [Header("Scan View")]
+    public bool hasRepairedDone = true;
+    public GameObject[] scanColliders;
+
+    public SUPERCharacterAIO playerController;
+
+
+    private IEnumerator Start()
     {
+
         extractedMaterial1 = null;
         extractedMaterial2 = null;
         extractedMaterial3 = null;
@@ -83,6 +92,14 @@ public class CoreMechanics : MonoBehaviour
         nextButton.SetActive(false);
 
         Time.timeScale = 0f;
+
+        // Wait until all Start methods have run
+        yield return null;
+
+        if (hasRepairedDone)
+        {
+            EnableScanPhase();
+        }
     }
 
     void Update()
@@ -123,19 +140,19 @@ public class CoreMechanics : MonoBehaviour
         }
 
         // Large Material Preview
-        if (extractedMaterial1 != null &&
+        if (!hasRepairedDone && extractedMaterial1 != null &&
             Keyboard.current.digit1Key.wasPressedThisFrame)
         {
             ShowMaterialPreview(extractedMaterial1);
         }
 
-        if (extractedMaterial2 != null &&
+        if (!hasRepairedDone && extractedMaterial2 != null &&
             Keyboard.current.digit2Key.wasPressedThisFrame)
         {
             ShowMaterialPreview(extractedMaterial2);
         }
 
-        if (extractedMaterial3 != null &&
+        if (!hasRepairedDone && extractedMaterial3 != null &&
             Keyboard.current.digit3Key.wasPressedThisFrame)
         {
             ShowMaterialPreview(extractedMaterial3);
@@ -157,7 +174,7 @@ public class CoreMechanics : MonoBehaviour
         }
 
         // Evaluate Materials
-        if (!guideEnabled && !isEndChecking &&
+        if (!hasRepairedDone && !guideEnabled && !isEndChecking &&
             !hasEnded && !isEvalCooldown && Keyboard.current.fKey.wasPressedThisFrame)
         {
             EvaluateMaterials();
@@ -209,6 +226,8 @@ public class CoreMechanics : MonoBehaviour
 
         RaycastHit hit;
 
+        if(hasRepairedDone) return;
+
         if (Physics.Raycast(
             ray,
             out hit,
@@ -249,15 +268,14 @@ public class CoreMechanics : MonoBehaviour
         if (selectedObject == null)
             return;
 
+        // Extract Material
         float scrollValue = Mouse.current.scroll.ReadValue().y;
 
-        // Extract Material
         if (scrollValue < 0)
         {
             ExtractMaterial();
         }
 
-        // Transfer Material
         if (scrollValue > 0)
         {
             TransferMaterial();
@@ -696,4 +714,78 @@ public class CoreMechanics : MonoBehaviour
         evalCooldownTime.text = "0";
         evalCooldown.SetActive(false);
     }
+
+    void EnableScanPhase()
+    {
+        playerController.ChangePerspective(PerspectiveModes._3rdPerson);
+
+        // Activate all rooms
+        foreach (GameObject room in materialScramble.rooms)
+        {
+            if (room != null)
+            {
+                room.SetActive(true);
+            }
+        }
+
+        // Disable material transfer UI
+        textureImage1.gameObject.SetActive(false);
+        textureImage2.gameObject.SetActive(false);
+        textureImage3.gameObject.SetActive(false);
+
+        evalResult.SetActive(false);
+        evalCooldown.SetActive(false);
+        largeTextureParent.SetActive(false);
+
+        // Remove colliders from Interactable and Selected objects
+        int interactableLayer = LayerMask.NameToLayer("Interactable");
+        int selectedLayer = LayerMask.NameToLayer("Selected");
+
+        GameObject[] allObjects = FindObjectsByType<GameObject>(
+            FindObjectsInactive.Include,
+            FindObjectsSortMode.None
+        );
+
+        int removedCount = 0;
+
+        foreach (GameObject obj in allObjects)
+        {
+            if (obj.layer != interactableLayer &&
+                obj.layer != selectedLayer)
+            {
+                continue;
+            }
+
+            Collider[] colliders = obj.GetComponents<Collider>();
+
+            foreach (Collider col in colliders)
+            {
+                col.enabled = false;
+                Destroy(col);
+                removedCount++;
+            }
+        }
+
+        // Activate scan colliders and their children
+        foreach (GameObject obj in scanColliders)
+        {
+            if (obj == null)
+                continue;
+
+            Transform[] allChildren =
+                obj.GetComponentsInChildren<Transform>(true);
+
+            foreach (Transform child in allChildren)
+            {
+                child.gameObject.SetActive(true);
+            }
+        }
+
+        Debug.Log(
+            "Scan Phase Enabled! All rooms activated. Removed " +
+            removedCount + " colliders."
+        );
+    }
 }
+
+
