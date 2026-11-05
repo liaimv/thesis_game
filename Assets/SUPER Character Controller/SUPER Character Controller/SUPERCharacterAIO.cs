@@ -461,7 +461,7 @@ public class SUPERCharacterAIO : MonoBehaviour{
             #endif
             MovInput.x = Keyboard.current.aKey.isPressed ? -1 : Keyboard.current.dKey.isPressed ? 1 : 0;
             MovInput.y = Keyboard.current.wKey.isPressed ? 1 : Keyboard.current.sKey.isPressed ? -1 : 0;
-        #else
+#else
             //camera
             MouseXY.x = Input.GetAxis("Mouse Y");
             MouseXY.y = Input.GetAxis("Mouse X");
@@ -478,16 +478,20 @@ public class SUPERCharacterAIO : MonoBehaviour{
             sprintInput_FrameOf = Input.GetKeyDown(sprintKey_L);
             slideInput_Momentary = Input.GetKey(slideKey_L);
             slideInput_FrameOf = Input.GetKeyDown(slideKey_L);
-            #if SAIO_ENABLE_PARKOUR
+#if SAIO_ENABLE_PARKOUR
 
             vaultInput = Input.GetKeyDown(VaultKey_L);
-            #endif
+#endif
             MovInput = Vector2.up *Input.GetAxisRaw("Vertical") + Vector2.right * Input.GetAxisRaw("Horizontal");
-        #endif
-        #endregion
+#endif
+                #endregion
 
-        #region Camera
-        if(enableCameraControl){
+                #region Camera
+                if (enableCameraControl)
+                {
+                    RotateView(MouseXY, Sensitivity, rotationWeight);
+                }
+                if (enableCameraControl){
             switch (cameraPerspective){
                 case PerspectiveModes._1stPerson:{
                     //This is called in FixedUpdate for the 3rd person mode
@@ -643,10 +647,19 @@ public class SUPERCharacterAIO : MonoBehaviour{
                 {
                     GetGroundInfo();
 
-                    // Disable gravity when grounded
-                    // Enable gravity when jumping or airborne
-                    p_Rigidbody.useGravity =
-                        !currentGroundInfo.isInContactWithGround || Jumped;
+                    // Check if the player is actually touching the ground
+                    bool actuallyGrounded = false;
+
+                    if (currentGroundInfo.isInContactWithGround)
+                    {
+                        float feetY = capsule.bounds.min.y;
+                        float groundY = currentGroundInfo.groundFromRay.point.y;
+
+                        actuallyGrounded = feetY <= groundY + 0.02f;
+                    }
+
+                    // Enable gravity until the player actually lands
+                    p_Rigidbody.useGravity = !actuallyGrounded || Jumped;
 
                     MovePlayer(InputDir, currentGroundSpeed);
 
@@ -658,7 +671,7 @@ public class SUPERCharacterAIO : MonoBehaviour{
                 #endregion
 
                 #region Camera
-                RotateView(MouseXY, Sensitivity, rotationWeight);
+                //RotateView(MouseXY, Sensitivity, rotationWeight);
              if(cameraPerspective == PerspectiveModes._3rdPerson){
                 UpdateBodyRotation_3rdPerson();
                 UpdateCameraPosition_3rdPerson();

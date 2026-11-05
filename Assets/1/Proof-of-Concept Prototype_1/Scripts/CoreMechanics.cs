@@ -41,6 +41,9 @@ public class CoreMechanics : MonoBehaviour
     public TextMeshProUGUI roomFinishText;
     public GameObject choiceButtons;
     public GameObject nextButton;
+    public GameObject scanGuide;
+    public GameObject evalGuide;
+    public GameObject secondGuide;
 
     private bool guideEnabled = true;
     private bool hasEnded = false;
@@ -123,6 +126,20 @@ public class CoreMechanics : MonoBehaviour
         destroyUI.SetActive(false);
         destroyChoice.SetActive(false);
         endUI.SetActive(false);
+        scanGuide.SetActive(false);
+        evalGuide.SetActive(true);
+        secondGuide.SetActive(false);
+
+        if (!hasRepairedDone)
+        {
+            foreach (GameObject obj in scanColliders)
+            {
+                if (obj != null)
+                {
+                    obj.SetActive(false);
+                }
+            }
+        }
 
         ChooseRandomVirus();
 
@@ -139,6 +156,14 @@ public class CoreMechanics : MonoBehaviour
 
     void Update()
     {
+        if (endUI.activeInHierarchy &&
+    Keyboard.current.rKey.wasPressedThisFrame)
+        {
+            Time.timeScale = 1f;
+            SceneManager.LoadScene(0);
+            return;
+        }
+
         // Room completion confirmation takes priority over every other input.
         if (isRoomFinishChecking)
         {
@@ -160,18 +185,16 @@ public class CoreMechanics : MonoBehaviour
         // Guide
         if (Keyboard.current.gKey.wasPressedThisFrame)
         {
-            if (guideEnabled)
-            {
-                guideObject.SetActive(false);
-                guideEnabled = false;
-                Time.timeScale = 1f;
-            }
-            else
-            {
-                guideObject.SetActive(true);
-                guideEnabled = true;
-                Time.timeScale = 0f;
-            }
+            // Decide which guide to use based on the current phase
+            GameObject currentGuide = hasRepairedDone
+                ? secondGuide
+                : guideObject;
+
+            guideEnabled = !guideEnabled;
+
+            currentGuide.SetActive(guideEnabled);
+
+            Time.timeScale = guideEnabled ? 0f : 1f;
         }
 
         if (hasRepairedDone)
@@ -731,6 +754,15 @@ public class CoreMechanics : MonoBehaviour
 
         // Refresh Scan View's renderer references
         scanViewLogic.RefreshRenderers();
+
+        guideObject.SetActive(false);
+        secondGuide.SetActive(true);
+
+        scanGuide.SetActive(true);
+        evalGuide.SetActive(false);
+
+        guideEnabled = true;
+        Time.timeScale = 0f;
 
         Debug.Log("Phase 2 Started! Collider displays initialized.");
     }
