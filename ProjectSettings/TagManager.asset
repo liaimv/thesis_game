@@ -12,6 +12,8 @@ TagManager:
   - House
   - CinemachineTarget
   - Chandelier
+  - Effect
+  - Start Area
   layers:
   - Default
   - TransparentFX
