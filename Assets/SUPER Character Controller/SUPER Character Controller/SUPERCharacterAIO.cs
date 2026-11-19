@@ -112,6 +112,13 @@ public class SUPERCharacterAIO : MonoBehaviour{
     //
     public bool enableMovementControl = true;
 
+    [Header("Flying Movement")]
+    public bool enableFlying = true;
+    public float flyingSpeed = 7f;
+    public float verticalFlyingSpeed = 5f;
+
+    private float verticalFlyingInput;
+
     //Walking/Sprinting/Crouching
     [Range(1.0f,650.0f)]public float walkingSpeed = 140, sprintingSpeed = 260, crouchingSpeed = 45;
     [Range(1.0f,400.0f)] public float decelerationSpeed=240;
@@ -461,6 +468,18 @@ public class SUPERCharacterAIO : MonoBehaviour{
             #endif
             MovInput.x = Keyboard.current.aKey.isPressed ? -1 : Keyboard.current.dKey.isPressed ? 1 : 0;
             MovInput.y = Keyboard.current.wKey.isPressed ? 1 : Keyboard.current.sKey.isPressed ? -1 : 0;
+
+                // Vertical flying input
+                verticalFlyingInput = 0f;
+
+                if (enableFlying)
+                {
+                    if (Keyboard.current.spaceKey.isPressed)
+                        verticalFlyingInput += 1f;
+
+                    if (Keyboard.current.leftShiftKey.isPressed)
+                        verticalFlyingInput -= 1f;
+                }
 #else
             //camera
             MouseXY.x = Input.GetAxis("Mouse Y");
@@ -645,34 +664,41 @@ public class SUPERCharacterAIO : MonoBehaviour{
 
                 if (enableMovementControl)
                 {
-                    GetGroundInfo();
-
-                    // Check if the player is actually touching the ground
-                    bool actuallyGrounded = false;
-
-                    if (currentGroundInfo.isInContactWithGround)
+                    if (enableFlying)
                     {
-                        float feetY = capsule.bounds.min.y;
-                        float groundY = currentGroundInfo.groundFromRay.point.y;
-
-                        actuallyGrounded = feetY <= groundY + 0.02f;
+                        FlyPlayer();
                     }
-
-                    // Enable gravity until the player actually lands
-                    p_Rigidbody.useGravity = !actuallyGrounded || Jumped;
-
-                    MovePlayer(InputDir, currentGroundSpeed);
-
-                    if (isSliding)
+                    else
                     {
-                        Slide();
+                        GetGroundInfo();
+
+                        // Check if the player is actually touching the ground
+                        bool actuallyGrounded = false;
+
+                        if (currentGroundInfo.isInContactWithGround)
+                        {
+                            float feetY = capsule.bounds.min.y;
+                            float groundY = currentGroundInfo.groundFromRay.point.y;
+
+                            actuallyGrounded = feetY <= groundY + 0.02f;
+                        }
+
+                        // Enable gravity until the player actually lands
+                        p_Rigidbody.useGravity = !actuallyGrounded || Jumped;
+
+                        MovePlayer(InputDir, currentGroundSpeed);
+
+                        if (isSliding)
+                        {
+                            Slide();
+                        }
                     }
                 }
                 #endregion
 
                 #region Camera
                 //RotateView(MouseXY, Sensitivity, rotationWeight);
-             if(cameraPerspective == PerspectiveModes._3rdPerson){
+                if (cameraPerspective == PerspectiveModes._3rdPerson){
                 UpdateBodyRotation_3rdPerson();
                 UpdateCameraPosition_3rdPerson();
             }
@@ -960,10 +986,43 @@ public class SUPERCharacterAIO : MonoBehaviour{
             transform.localRotation = (Quaternion.Euler(Vector3.up*Mathf.MoveTowardsAngle(p_Rigidbody.rotation.eulerAngles.y, headRot.y,10)));
         }
     }
-    #endregion
+        #endregion
 
-    #region Movement Functions
-    void MovePlayer(Vector3 Direction, float Speed){
+        #region Movement Functions
+
+        void FlyPlayer()
+        {
+            // Disable gravity
+            p_Rigidbody.useGravity = false;
+
+            // Keep WASD movement horizontal
+            Vector3 horizontalDirection = InputDir;
+            horizontalDirection.y = 0f;
+
+            horizontalDirection = Vector3.ClampMagnitude(
+                horizontalDirection, 1f
+            );
+
+            // Horizontal movement
+            Vector3 horizontalVelocity =
+                horizontalDirection * flyingSpeed;
+
+            // Vertical movement
+            Vector3 verticalVelocity =
+                Vector3.up *
+                verticalFlyingInput *
+                verticalFlyingSpeed;
+
+            // Apply movement
+            p_Rigidbody.linearVelocity =
+                horizontalVelocity + verticalVelocity;
+
+            // Prevent friction from interfering with flying
+            capsule.sharedMaterial = _ZeroFriction;
+
+            isIdle = p_Rigidbody.linearVelocity.sqrMagnitude < 0.0001f;
+        }
+        void MovePlayer(Vector3 Direction, float Speed){
        // GroundInfo gI = GetGroundInfo();
         isIdle = Direction.normalized.magnitude <=0;
         _2DVelocity = Vector2.right * p_Rigidbody.linearVelocity.x + Vector2.up * p_Rigidbody.linearVelocity.z;
@@ -2008,7 +2067,31 @@ public class SuperFPEditor : Editor{
 
             
             EditorGUILayout.Space(20);
-            GUI.enabled = false;
+                // Flying Movement Settings
+                EditorGUILayout.BeginVertical(BoxPanel);
+
+                GUILayout.Label("Flying Movement", labelSubHeaderStyle);
+
+                serializedObject.Update();
+
+                EditorGUILayout.PropertyField(
+                    serializedObject.FindProperty("enableFlying")
+                );
+
+                EditorGUILayout.PropertyField(
+                    serializedObject.FindProperty("flyingSpeed")
+                );
+
+                EditorGUILayout.PropertyField(
+                    serializedObject.FindProperty("verticalFlyingSpeed")
+                );
+
+                serializedObject.ApplyModifiedProperties();
+
+                EditorGUILayout.EndVertical();
+
+                EditorGUILayout.Space();
+                GUI.enabled = false;
             t.currentStance = (Stances)EditorGUILayout.EnumPopup(new GUIContent("Current Stance", "Displays the character's current stance"),t.currentStance);
             GUI.enabled = true;
             t.stanceTransitionSpeed = EditorGUILayout.Slider(new GUIContent("Stance Transition Speed", "How quickly should the character change stances?"),t.stanceTransitionSpeed,0.1f, 10);

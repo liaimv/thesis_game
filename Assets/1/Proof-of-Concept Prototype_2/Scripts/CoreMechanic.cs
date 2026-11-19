@@ -1028,6 +1028,16 @@ public class CoreMechanic : MonoBehaviour
 
     void EnableScanPhase()
     {
+        playerController.enableFlying = false;
+
+        Rigidbody rb = playerController.GetComponent<Rigidbody>();
+
+        if (rb != null)
+        {
+            rb.useGravity = true;
+            rb.linearVelocity = Vector3.zero;
+        }
+
         playerController.ChangePerspective(PerspectiveModes._3rdPerson);
 
         // Activate all rooms
