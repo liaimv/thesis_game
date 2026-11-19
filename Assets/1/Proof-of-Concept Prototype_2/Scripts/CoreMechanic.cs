@@ -19,6 +19,8 @@ public class CoreMechanic : MonoBehaviour
     public RawImage textureImage2;
     public RawImage textureImage3;
     public RawImage largeTextureImage;
+    public TextMeshProUGUI largeTextureCloseText;
+    private int currentPreviewSlot = 0;
     public GameObject largeTextureParent;
     public GameObject endCheck;
     public GameObject finalResults;
@@ -118,6 +120,9 @@ public class CoreMechanic : MonoBehaviour
 
     public Transform startArea;
 
+    public GameObject controlsGuide1;
+    public GameObject controlsGuide2;
+
     private IEnumerator Start()
     {
 
@@ -149,6 +154,8 @@ public class CoreMechanic : MonoBehaviour
         evalInfo.SetActive(false);
         evalNextInfo.SetActive(false);
         nextPhaseButton.SetActive(false);
+        controlsGuide1.SetActive(true);
+        controlsGuide2.SetActive(false);
 
         if (!hasRepairedDone)
         {
@@ -228,36 +235,25 @@ public class CoreMechanic : MonoBehaviour
         }
 
         // Large Material Preview
-        if (!hasRepairedDone && extractedMaterial1 != null &&
-            Keyboard.current.digit1Key.wasPressedThisFrame)
+        if (Keyboard.current.digit1Key.wasPressedThisFrame &&
+            extractedMaterial1 != null)
         {
-            ShowMaterialPreview(extractedMaterial1);
+            ToggleMaterialPreview(extractedMaterial1, 1);
         }
-
-        if (!hasRepairedDone && extractedMaterial2 != null &&
-            Keyboard.current.digit2Key.wasPressedThisFrame)
+        else if (Keyboard.current.digit2Key.wasPressedThisFrame &&
+            extractedMaterial2 != null)
         {
-            ShowMaterialPreview(extractedMaterial2);
+            ToggleMaterialPreview(extractedMaterial2, 2);
         }
-
-        if (!hasRepairedDone && extractedMaterial3 != null &&
-            Keyboard.current.digit3Key.wasPressedThisFrame)
+        else if (Keyboard.current.digit3Key.wasPressedThisFrame &&
+            extractedMaterial3 != null)
         {
-            ShowMaterialPreview(extractedMaterial3);
+            ToggleMaterialPreview(extractedMaterial3, 3);
         }
 
         if (largeTextureEnabled)
         {
             Time.timeScale = 0f;
-
-            if (Keyboard.current.qKey.wasPressedThisFrame)
-            {
-                largeTextureParent.SetActive(false);
-                largeTextureEnabled = false;
-
-                Time.timeScale = guideEnabled ? 0f : 1f;
-            }
-
             return;
         }
 
@@ -669,14 +665,33 @@ public class CoreMechanic : MonoBehaviour
     }
 
     // Large Material Preview
-    void ShowMaterialPreview(Material mat)
+    void ToggleMaterialPreview(Material mat, int slot)
     {
+        // Close if the same texture is already open
+        if (largeTextureEnabled && currentPreviewSlot == slot)
+        {
+            largeTextureParent.SetActive(false);
+            largeTextureEnabled = false;
+            currentPreviewSlot = 0;
+
+            Time.timeScale = guideEnabled ? 0f : 1f;
+
+            return;
+        }
+
+        // Open or switch to another texture
         largeTextureParent.SetActive(true);
 
         largeTextureImage.texture =
             GetMaterialPreview(mat);
 
         largeTextureEnabled = true;
+        currentPreviewSlot = slot;
+
+        // Update exit instruction
+        largeTextureCloseText.text = slot + " to Exit";
+
+        Time.timeScale = 0f;
     }
 
     // Calculate Fixed Percentage
@@ -747,8 +762,8 @@ public class CoreMechanic : MonoBehaviour
 
         float percentage = GetGlobalPercentage();
 
-        // Unlock Evaluation at 33%
-        if (percentage >= 33f && !hasUnlockedEvaluation)
+        // Unlock Evaluation at 30%
+        if (percentage >= 30f && !hasUnlockedEvaluation)
         {
             hasUnlockedEvaluation = true;
 
@@ -756,13 +771,19 @@ public class CoreMechanic : MonoBehaviour
                 StartCoroutine(ShowEvaluationInfo());
         }
 
-        // Unlock Next Phase at 66%
-        if (percentage >= 66f && !hasUnlockedNextPhase)
+        // Unlock Next Phase at 60%
+        if (percentage >= 60f && !hasUnlockedNextPhase)
         {
             hasUnlockedNextPhase = true;
 
             evalNextInfoCoroutine =
                 StartCoroutine(ShowNextPhaseInfo());
+        }
+
+        // Unlock Auto Next Phase at 100%
+        if (percentage >= 100f)
+        {
+            OpenNextPhaseCheck();
         }
     }
 
@@ -804,9 +825,9 @@ public class CoreMechanic : MonoBehaviour
         float percentage = GetGlobalPercentage();
 
         // Make sure current stability is sufficient
-        if (percentage < 66f)
+        if (percentage < 60f)
         {
-            Debug.Log("System stability must be at least 66%.");
+            Debug.Log("System stability must be at least 60%.");
             return;
         }
 
@@ -1057,6 +1078,9 @@ public class CoreMechanic : MonoBehaviour
         evalResult.SetActive(false);
         evalCooldown.SetActive(false);
         largeTextureParent.SetActive(false);
+
+        controlsGuide1.SetActive(false);
+        controlsGuide2.SetActive(true);
 
         // Stop pending unlock notifications
         if (evalInfoCoroutine != null)

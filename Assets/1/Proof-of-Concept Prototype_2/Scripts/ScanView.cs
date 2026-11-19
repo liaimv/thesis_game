@@ -73,7 +73,7 @@ public class ScanView : MonoBehaviour
         if (coreMechanics == null || !coreMechanics.hasRepairedDone)
             return;
 
-        if (Keyboard.current.shiftKey.wasPressedThisFrame)
+        if (Mouse.current.leftButton.wasPressedThisFrame)
         {
             scanViewOn = !scanViewOn;
 

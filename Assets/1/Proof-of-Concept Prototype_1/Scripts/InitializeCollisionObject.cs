@@ -79,13 +79,6 @@ public class InitializeCollisionObject : MonoBehaviour
         GameObject colliderObject =
             GameObject.CreatePrimitive(type);
 
-        Collider physicsCollider = colliderObject.GetComponent<Collider>();
-
-        if (physicsCollider != null)
-        {
-            Destroy(physicsCollider);
-        }
-
         colliderObject.name = "ColliderDisplay";
 
         // Parent under target
