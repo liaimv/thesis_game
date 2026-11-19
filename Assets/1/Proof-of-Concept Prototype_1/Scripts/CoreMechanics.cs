@@ -108,8 +108,8 @@ public class CoreMechanics : MonoBehaviour
         extractedMaterial1 = null;
         extractedMaterial2 = null;
         extractedMaterial3 = null;
-        materialOrigin1 = materialOrigin2;
-        materialOrigin2 = materialOrigin3;
+        materialOrigin1 = null;
+        materialOrigin2 = null;
         materialOrigin3 = null;
 
         UpdateInventoryUI();
@@ -509,6 +509,10 @@ public class CoreMechanics : MonoBehaviour
         extractedMaterial1 = extractedMaterial2;
         extractedMaterial2 = extractedMaterial3;
         extractedMaterial3 = null;
+
+        materialOrigin1 = materialOrigin2;
+        materialOrigin2 = materialOrigin3;
+        materialOrigin3 = null;
 
         UpdateInventoryUI();
     }
