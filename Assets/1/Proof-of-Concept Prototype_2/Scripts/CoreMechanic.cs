@@ -43,7 +43,6 @@ public class CoreMechanic : MonoBehaviour
     public TextMeshProUGUI roomFinishText;
     public GameObject choiceButtons;
     public GameObject nextButton;
-    public GameObject scanGuide;
     public GameObject evalGuide;
     public GameObject secondGuide;
 
@@ -147,7 +146,6 @@ public class CoreMechanic : MonoBehaviour
         destroyUI.SetActive(false);
         destroyChoice.SetActive(false);
         endUI.SetActive(false);
-        scanGuide.SetActive(false);
         evalGuide.SetActive(false);
         secondGuide.SetActive(false);
         evalButton.SetActive(false);
@@ -957,7 +955,6 @@ public class CoreMechanic : MonoBehaviour
         guideObject.SetActive(false);
         secondGuide.SetActive(true);
 
-        scanGuide.SetActive(true);
         evalGuide.SetActive(false);
 
         guideEnabled = true;
